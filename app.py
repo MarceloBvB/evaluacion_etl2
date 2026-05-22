@@ -28,11 +28,11 @@ def db_upload_famosos(df_f):
 # Configuración de la página
 st.set_page_config(page_title="Procesador Universal ETL", layout="wide")
 
-st.title("🚀 Procesador Inteligente Universal - ETL")
-st.subheader("Sube cualquier dataset y el sistema lo procesará automáticamente")
+st.title("Evaluacion 2 Parte 2 - ETL")
+st.subheader("Sube cualquier dataset")
 st.markdown("---")
 
-st.write("Coloca aquí tu archivo `.TXT` (ya sea el de Famosos o el de Ubicaciones). El motor identificará la estructura y aplicará las reglas de normalización correspondientes.")
+st.write("Coloca aquí tu archivo `.TXT`.")
 
 # ÚNICO BOTÓN DE SUBIDA
 archivo_subido = st.file_uploader("Arrastra o selecciona tu archivo de datos (.TXT)", type=["txt"])
@@ -66,12 +66,12 @@ if archivo_subido is not None:
             es_lugares = True
 
         if es_lugares:
-            st.success("🎯 ¡Dataset de UBICACIONES detectado automáticamente!")
+            st.success("¡Dataset de UBICACIONES detectado automáticamente!")
             
             with st.spinner("Ejecutando ETL de normalización en 3 tablas..."):
                 df_lugares, df_geo, df_dir = procesar_lugares(archivo_limpio)
                 
-            st.markdown("### 📊 Resultado de la Normalización Relacional")
+            st.markdown("### Resultado de la Normalización Relacional")
             
             col1, col2 = st.columns(2)
             with col1:
@@ -106,12 +106,12 @@ if archivo_subido is not None:
             
         else:
             # Si no contiene elementos de dirección, ejecutamos la lógica de Famosos
-            st.success("🎯 ¡Dataset de FAMOSOS detectado automáticamente!")
+            st.success("¡Dataset de FAMOSOS detectado automáticamente!")
             
             with st.spinner("Ejecutando ETL de Limpieza, Edades y Cumpleaños..."):
                 df_famosos = procesar_famosos(archivo_limpio)
                 
-            st.markdown("### 📈 Resultado del Dataset de Famosos")
+            st.markdown("### Resultado del Dataset de Famosos")
             st.dataframe(df_famosos, use_container_width=True)
             
             st.markdown("---")
