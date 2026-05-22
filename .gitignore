@@ -1,0 +1,6 @@
+# Variables de entorno (Credenciales)
+.env
+
+# Entornos virtuales y caché de Python
+__pycache__/
+venv/
