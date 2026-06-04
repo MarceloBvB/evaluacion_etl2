@@ -48,6 +48,10 @@ def procesar_lugares(archivo_subido):
     tabla_georeferencias['longitud'] = geo_split[1].str.strip() if 1 in geo_split.columns else ''
     tabla_georeferencias.replace('nan', '', inplace=True) # Limpiar textos "nan" indeseados
     
+    # Convertir a valores numéricos para habilitar la creación de mapas (Parte III)
+    tabla_georeferencias['latitud'] = pd.to_numeric(tabla_georeferencias['latitud'], errors='coerce')
+    tabla_georeferencias['longitud'] = pd.to_numeric(tabla_georeferencias['longitud'], errors='coerce')
+    
     # ORDENAMIENTO A-Z por 'latitud'
     tabla_georeferencias = tabla_georeferencias.sort_values(by='latitud', ascending=True).reset_index(drop=True)
 
@@ -100,6 +104,6 @@ def procesar_lugares(archivo_subido):
 
     # Aplicamos la misma regla a latitud/longitud por si vienen vacíos, evitando errores en base de datos
     for col in ['latitud', 'longitud']:
-        tabla_georeferencias[col] = tabla_georeferencias[col].apply(lambda x: None if pd.isna(x) or str(x).strip() == '' else x)
+        tabla_georeferencias[col] = tabla_georeferencias[col].apply(lambda x: None if pd.isna(x) else float(x))
 
     return tabla_lugares, tabla_georeferencias, tabla_direcciones

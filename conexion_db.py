@@ -35,6 +35,25 @@ def inicializar_tablas():
     ALTER TABLE famosos ALTER COLUMN fecha_final TYPE VARCHAR(255);
     """)
     
+    # Nuevas Tablas para la Parte I (Comunas y Auditoría)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS comunas (
+        nombre_comuna VARCHAR(255) PRIMARY KEY,
+        region VARCHAR(255),
+        habitantes INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS auditoria (
+        id SERIAL PRIMARY KEY,
+        fecha_ejecucion TIMESTAMP,
+        registros_leidos INTEGER,
+        comunas_procesadas INTEGER,
+        duplicados_eliminados INTEGER,
+        consolidados_correctamente INTEGER,
+        no_encontrados INTEGER,
+        errores TEXT
+    );
+    """)
+
     # Tablas Lugares, Georeferencias y Direcciones (Estructura Relacional)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS lugares (
@@ -86,6 +105,38 @@ def insertar_datos(tabla, df, columnas, conflict_col):
         valores_ordenados = tuple(fila[df.columns[df.columns.str.lower() == col.lower()][0]] for col in columnas)
         cursor.execute(query, valores_ordenados)
         
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+def guardar_comuna_bd(nombre, region, habitantes):
+    """
+    Guarda la comuna consolidada. Si ya existe, actualiza sus datos
+    (Evitando registros duplicados según rúbrica).
+    """
+    conn = obtener_conexion()
+    cursor = conn.cursor()
+    query = """
+        INSERT INTO comunas (nombre_comuna, region, habitantes)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (nombre_comuna) DO UPDATE 
+        SET region = EXCLUDED.region, habitantes = EXCLUDED.habitantes;
+    """
+    cursor.execute(query, (nombre, region, habitantes))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+def guardar_auditoria_bd(fecha, leidos, procesadas, duplicados, consolidados, no_encontrados, errores):
+    """Registra las métricas de ejecución del proceso de comunas en la base de datos."""
+    conn = obtener_conexion()
+    cursor = conn.cursor()
+    query = """
+        INSERT INTO auditoria (fecha_ejecucion, registros_leidos, comunas_procesadas, 
+                               duplicados_eliminados, consolidados_correctamente, no_encontrados, errores)
+        VALUES (%s, %s, %s, %s, %s, %s, %s);
+    """
+    cursor.execute(query, (fecha, leidos, procesadas, duplicados, consolidados, no_encontrados, errores))
     conn.commit()
     cursor.close()
     conn.close()
