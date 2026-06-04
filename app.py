@@ -47,8 +47,8 @@ st.markdown("""
     }
     </style>
     <div class="header-card">
-        <h1>🌐 Plataforma ETL y Análisis Avanzado</h1>
-        <h4>Consolidación de Datos, Caché de APIs y Geolocalización 3D</h4>
+        <h1>Evaluación 2 Parte Final</h1>
+        <h4>Consolidación de Datos</h4>
     </div>
 """, unsafe_allow_html=True)
 
@@ -356,7 +356,7 @@ if st.button("Procesar y Consolidar Sistema", type="primary", use_container_widt
         m4.metric("Consolidados OK", stats["consolidados"], delta="UPSERT", delta_color="normal")
         
         if stats["no_encontrados"] > 0:
-            st.warning(f"⚠️ Alerta Operativa: {stats['no_encontrados']} registros ignorados por no pertenecer al dataset oficial.")
+            st.warning(f"Alerta Operativa: {stats['no_encontrados']} registros ignorados por no pertenecer al dataset oficial.")
 
 st.markdown("#### Vista de Datos Consolidados en Neon")
 # Renderizar Dataframes interactivos independientemente del botón para visibilidad continua
@@ -465,7 +465,7 @@ def get_wiki_image(name):
     except Exception as e:
         return None, None, False
 
-archivo_famosos = st.file_uploader("📂 Sube tu archivo de famosos (.txt, .csv)", type=['txt', 'csv'], key="upload_famosos")
+archivo_famosos = st.file_uploader("Sube tu archivo de famosos (.txt, .csv)", type=['txt', 'csv'], key="upload_famosos")
 
 if archivo_famosos is not None:
     try:
@@ -517,7 +517,7 @@ else:
 # ------------------------------------------
 # SECCIÓN 3: GEOLOCALIZACIÓN HISTÓRICA
 # ------------------------------------------
-st.markdown("<h2 class='section-header'>🗺️ III. Geolocalización Histórica Mundial</h2>", unsafe_allow_html=True)
+st.markdown("<h2 class='section-header'>Geolocalización </h2>", unsafe_allow_html=True)
 st.write("Explora la base de datos relacional mediante un modelo de renderizado 3D dinámico impulsado por Pydeck.")
 
 try:
@@ -542,7 +542,7 @@ try:
             
     if not df_lugares.empty:
         opciones_lugares = ["Seleccione un lugar para acercar..."] + sorted(df_lugares['nombre_lugar'].tolist())
-        seleccion = st.selectbox("📍 Buscar destino histórico:", opciones_lugares)
+        seleccion = st.selectbox("Buscar destino histórico:", opciones_lugares)
         
         view_lat = df_lugares['lat'].mean()
         view_lon = df_lugares['lon'].mean()
