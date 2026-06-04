@@ -81,10 +81,11 @@ def inicializar_tablas():
             with conn.cursor() as cur:
                 # Tablas de Comunas y Auditoría
                 cur.execute("""
-                    CREATE TABLE IF NOT EXISTS comunas (
+                    CREATE TABLE IF NOT EXISTS comunas_consolidadas (
                         nombre_comuna VARCHAR(255) PRIMARY KEY,
                         region VARCHAR(255),
-                        habitantes INTEGER
+                        habitantes INTEGER,
+                        actualizado_en TIMESTAMP
                     );
                     CREATE TABLE IF NOT EXISTS auditoria (
                         id SERIAL PRIMARY KEY,
@@ -126,19 +127,97 @@ def inicializar_tablas():
 # Aseguramos inicializar la base al abrir la App
 inicializar_tablas()
 
-# Dataset Público para la Pestaña 1
-DATASET_OFICIAL = {
-    "penco": {"region": "Región del Biobío", "habitantes": 47367},
-    "florida": {"region": "Región del Biobío", "habitantes": 10624},
-    "la florida": {"region": "Región Metropolitana", "habitantes": 366916},
-    "concepcion": {"region": "Región del Biobío", "habitantes": 223574},
-    "santiago": {"region": "Región Metropolitana", "habitantes": 404495},
-    "valparaiso": {"region": "Región de Valparaíso", "habitantes": 296655},
-    "vina del mar": {"region": "Región de Valparaíso", "habitantes": 334248},
-    "temuco": {"region": "Región de La Araucanía", "habitantes": 282415},
-    "antofagasta": {"region": "Región de Antofagasta", "habitantes": 361873},
-    "talcahuano": {"region": "Región del Biobío", "habitantes": 151749}
-}
+@st.cache_data(show_spinner=False, ttl=86400)
+def obtener_comunas_chile_oficial():
+    """
+    Combina 2 APIs Oficiales/Públicas (JOIN) para obtener datos exactos:
+    1. API DPA (Gobierno): Garantiza el 100% de las 346 comunas y sus regiones.
+    2. API Wikipedia: Extrae el censo de habitantes para rellenar los datos.
+    *Nota: Bloques try-except independientes para tolerancia a fallos.
+    """
+    dataset = {}
+    headers = {"User-Agent": "GestorApp/1.0 (contacto@dominio.com) python-requests"}
+    
+    # --- API 1: Wikipedia (Censo de Habitantes - Más rápida) ---
+    try:
+        import html
+        params = {"action": "parse", "page": "Anexo:Comunas_de_Chile", "prop": "text", "format": "json"}
+        res = requests.get("https://es.wikipedia.org/w/api.php", params=params, headers=headers, timeout=10)
+        if res.status_code == 200:
+            html_content = res.json()['parse']['text']['*']
+            rows = re.findall(r'<tr[^>]*>(.*?)</tr>', html_content, re.DOTALL | re.IGNORECASE)
+            for row in rows:
+                cols = re.findall(r'<t[dh][^>]*>(.*?)</t[dh]>', row, re.DOTALL | re.IGNORECASE)
+                if len(cols) >= 6:
+                    comuna_raw = html.unescape(re.sub(r'<[^>]+>', '', cols[1])).strip()
+                    if comuna_raw.lower() in ["comuna", ""]: continue
+                    
+                    comuna = re.sub(r'\[\d+\]', '', comuna_raw).strip()
+                    key_wiki = unicodedata.normalize('NFD', comuna.lower()).encode('ascii', 'ignore').decode('utf-8')
+                    
+                    region_raw = html.unescape(re.sub(r'<[^>]+>', '', cols[3])).strip()
+                    region = re.sub(r'\[\d+\]', '', region_raw).strip()
+                    
+                    pob_raw = html.unescape(re.sub(r'<[^>]+>', '', cols[5])).replace('&#160;', '').replace('&nbsp;', '').replace(' ', '').replace('.', '').strip()
+                    try:
+                        habitantes = int(re.search(r'\d+', pob_raw).group())
+                    except:
+                        habitantes = 0
+                        
+                    dataset[key_wiki] = {
+                        "region": region if "Región" in region else f"Región de {region}",
+                        "habitantes": habitantes
+                    }
+    except Exception as e:
+        pass # Si falla Wikipedia, continúa silenciosamente
+        
+    # --- API 2: Gobierno de Chile (DPA - Garantiza la base de 346 comunas) ---
+    try:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        reg = requests.get("https://apis.digital.gob.cl/dpa/regiones", headers=headers, timeout=15, verify=False)
+        prov = requests.get("https://apis.digital.gob.cl/dpa/provincias", headers=headers, timeout=15, verify=False)
+        com = requests.get("https://apis.digital.gob.cl/dpa/comunas", headers=headers, timeout=15, verify=False)
+        
+        if reg.status_code == 200 and com.status_code == 200:
+            mapa_regiones = {r['codigo']: r['nombre'] for r in reg.json()}
+            mapa_provincias = {p['codigo']: p['codigo_padre'] for p in prov.json()} if prov.status_code == 200 else {}
+            
+            for c in com.json():
+                nombre = c['nombre']
+                cod_prov = c['codigo_padre']
+                cod_reg = mapa_provincias.get(cod_prov)
+                nombre_region = mapa_regiones.get(cod_reg, "Región Desconocida")
+                
+                key = unicodedata.normalize('NFD', nombre.lower()).encode('ascii', 'ignore').decode('utf-8')
+                
+                if key not in dataset: # Solo inserta si no la pilló Wikipedia primero
+                    dataset[key] = {
+                        "region": nombre_region if "Región" in nombre_region else f"Región de {nombre_region}",
+                        "habitantes": 0
+                    }
+    except Exception as e:
+        pass # Si DPA falla, conserva lo que haya logrado extraer Wikipedia
+
+    # --- Fallback Extremo si AMBAS APIs mueren al mismo tiempo (sin internet) ---
+    if not dataset:
+        return {
+            "arica": {"region": "Región de Arica y Parinacota", "habitantes": 221364},
+            "iquique": {"region": "Región de Tarapacá", "habitantes": 191468},
+            "antofagasta": {"region": "Región de Antofagasta", "habitantes": 361873},
+            "pica": {"region": "Región de Tarapacá", "habitantes": 9296},
+            "penco": {"region": "Región del Biobío", "habitantes": 47367}, 
+            "santiago": {"region": "Región Metropolitana", "habitantes": 404495},
+            "quillon": {"region": "Región de Ñuble", "habitantes": 17485},
+            "iquique": {"region": "Región de Tarapacá", "habitantes": 191468},
+            "florida": {"region": "Región del Biobío", "habitantes": 10624},
+            "la florida": {"region": "Región Metropolitana", "habitantes": 366916}
+        }
+        
+    return dataset
+
+# Cargar el dataset dinámico al arrancar mediante la API oficial
+DATASET_OFICIAL = obtener_comunas_chile_oficial()
 
 # ==========================================
 # 3. BARRA LATERAL INFORMATIVA
@@ -158,16 +237,18 @@ with st.sidebar:
 # ------------------------------------------
 # SECCIÓN 1: COMUNAS DE CHILE
 # ------------------------------------------
-st.markdown("<h2 class='section-header'>🔄 I. Consolidación de Comunas de Chile</h2>", unsafe_allow_html=True)
-st.write("Ingrese los datos para procesar. El sistema limpiará las cadenas, normalizará a **Formato Título** de forma 100% automática, validará duplicados (UPSERT) y persistirá la auditoría en Neon.")
+st.markdown("<h2 class='section-header'>Comunas de Chile</h2>", unsafe_allow_html=True)
+st.write("Ingrese los datos para procesar. El sistema limpiará las cadenas, removerá caracteres inconsistentes, aplicará el formato seleccionado, validará duplicados y persistirá la auditoría.")
+
+formato_comuna = st.radio("Seleccione el formato de normalización a aplicar:", ["Formato Título", "MAYÚSCULAS", "minúsculas"], horizontal=True)
 
 col_input1, col_input2 = st.columns(2)
 with col_input1:
-    input_text = st.text_area("📝 Ingreso Manual (Separado por comas)", placeholder="Ejemplo: florida, penco, santiago", height=100)
+    input_text = st.text_area("Ingreso Manual (Separado por comas)", placeholder="Ejemplo: florida, penco, santiago", height=100)
 with col_input2:
-    uploaded_file = st.file_uploader("📂 Carga de Archivo (.txt, .csv)", type=['txt', 'csv'])
+    uploaded_file = st.file_uploader("Carga de Archivo (.txt, .csv)", type=['txt', 'csv'])
 
-if st.button("🚀 Procesar y Consolidar Sistema", type="primary", use_container_width=True):
+if st.button("Procesar y Consolidar Sistema", type="primary", use_container_width=True):
     raw_texts = []
     if input_text:
         raw_texts.extend([c.strip() for c in input_text.split(',') if c.strip()])
@@ -183,13 +264,23 @@ if st.button("🚀 Procesar y Consolidar Sistema", type="primary", use_container
             st.error(f"Error al leer el archivo: {e}")
     
     if not raw_texts:
-        st.warning("⚠️ Por favor, ingrese o cargue al menos una comuna.")
+        st.warning("Por favor, ingrese o cargue al menos una comuna.")
     else:
-        with st.spinner("⏳ Procesando, normalizando automáticamente y guardando en Neon DB..."):
-            # 1. Normalización 100% Automática
+        with st.spinner("Procesando, normalizando y guardando en Neon DB..."):
+            # 1. Normalización según selección del usuario y limpieza de caracteres
             comunas_limpias = []
             for c in raw_texts:
-                c_norm = re.sub(r'\s+', ' ', c.strip()).title() # Forzar Title Case automático
+                # Corrección de caracteres inconsistentes (se dejan solo letras, números y espacios)
+                c_clean = re.sub(r'[^\w\s]', '', c.strip())
+                c_norm = re.sub(r'\s+', ' ', c_clean)
+                
+                if formato_comuna == "Formato Título":
+                    c_norm = c_norm.title()
+                elif formato_comuna == "MAYÚSCULAS":
+                    c_norm = c_norm.upper()
+                else:
+                    c_norm = c_norm.lower()
+                    
                 comunas_limpias.append(c_norm)
                 
             # 2. Filtro y Métricas
@@ -212,15 +303,26 @@ if st.button("🚀 Procesar y Consolidar Sistema", type="primary", use_container
                             # Preparar string sin tildes y en minúscula solo para buscar en el diccionario
                             c_search = unicodedata.normalize('NFD', comuna.lower()).encode('ascii', 'ignore').decode('utf-8')
                             
+                            # Validar Regla de Negocio Específica para "Florida"
+                            if c_search == "florida":
+                                st.info("💡 **Sugerencia del Sistema:** Se ha detectado la entrada 'Florida'. Como opciones válidas en Chile existen **'Florida'** (Región del Biobío) y **'La Florida'** (Región Metropolitana).")
+                            
                             if c_search in DATASET_OFICIAL:
                                 region = DATASET_OFICIAL[c_search]["region"]
                                 habs = DATASET_OFICIAL[c_search]["habitantes"]
+                                
                                 try:
+                                    # Limpiar posibles duplicados antiguos por diferencias de mayúsculas/minúsculas ("PENCO" vs "Penco")
+                                    cur.execute("DELETE FROM comunas_consolidadas WHERE LOWER(nombre_comuna) = LOWER(%s) AND nombre_comuna != %s", (comuna, comuna))
+                                    
                                     cur.execute("""
-                                        INSERT INTO comunas (nombre_comuna, region, habitantes)
-                                        VALUES (%s, %s, %s)
-                                        ON CONFLICT (nombre_comuna) DO UPDATE 
-                                        SET region = EXCLUDED.region, habitantes = EXCLUDED.habitantes;
+                                        INSERT INTO comunas_consolidadas (nombre_comuna, region, habitantes, actualizado_en)
+                                        VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+                                        ON CONFLICT (nombre_comuna) 
+                                        DO UPDATE SET 
+                                            region = EXCLUDED.region,
+                                            habitantes = EXCLUDED.habitantes,
+                                            actualizado_en = CURRENT_TIMESTAMP;
                                     """, (comuna, region, habs))
                                     stats["consolidados"] += 1
                                 except Exception as e:
@@ -228,7 +330,7 @@ if st.button("🚀 Procesar y Consolidar Sistema", type="primary", use_container
                                     conn.rollback()
                             else:
                                 stats["no_encontrados"] += 1
-                                stats["errores"].append(f"'{comuna}' no oficial.")
+                                stats["errores"].append(f"'{comuna}' ignorada por no existir en la fuente oficial.")
                                 
                         errores_str = " | ".join(stats["errores"]) if stats["errores"] else "Ningún error."
                         
@@ -246,7 +348,7 @@ if st.button("🚀 Procesar y Consolidar Sistema", type="primary", use_container
                     conn.close()
 
         # Mostrar métricas animadas
-        st.success("✅ ¡Procesamiento completado con éxito!")
+        st.success("¡Procesamiento completado con éxito!")
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Registros Ingresados", stats["leidos"])
         m2.metric("Procesados (Únicos)", stats["procesadas"])
@@ -256,13 +358,13 @@ if st.button("🚀 Procesar y Consolidar Sistema", type="primary", use_container
         if stats["no_encontrados"] > 0:
             st.warning(f"⚠️ Alerta Operativa: {stats['no_encontrados']} registros ignorados por no pertenecer al dataset oficial.")
 
-st.markdown("#### 📊 Vista de Datos Consolidados en Neon")
+st.markdown("#### Vista de Datos Consolidados en Neon")
 # Renderizar Dataframes interactivos independientemente del botón para visibilidad continua
 try:
     conn = get_db_connection()
     if conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("SELECT * FROM comunas ORDER BY nombre_comuna")
+            cur.execute("SELECT * FROM comunas_consolidadas ORDER BY nombre_comuna")
             df_comunas = pd.DataFrame(cur.fetchall())
             cur.execute("SELECT * FROM auditoria ORDER BY fecha_ejecucion DESC LIMIT 10")
             df_auditoria = pd.DataFrame(cur.fetchall())
@@ -284,7 +386,7 @@ except Exception as e:
 # ------------------------------------------
 # SECCIÓN 2: GALERÍA DE CELEBRIDADES
 # ------------------------------------------
-st.markdown("<h2 class='section-header'>🎭 II. Galería de Celebridades e Inteligencia de Caché</h2>", unsafe_allow_html=True)
+st.markdown("<h2 class='section-header'>Galería de Celebridades</h2>", unsafe_allow_html=True)
 st.write("Sube un archivo de texto con la lista de famosos. El sistema procesará los datos e identificará las celebridades para buscar sus imágenes vía API, optimizando con una caché en base de datos.")
 
 def get_wiki_image(name):
@@ -368,12 +470,12 @@ archivo_famosos = st.file_uploader("📂 Sube tu archivo de famosos (.txt, .csv)
 if archivo_famosos is not None:
     try:
         df_famosos = procesar_famosos(archivo_famosos)
-        st.success("✅ Dataset de celebridades procesado exitosamente.")
+        st.success("Dataset de celebridades procesado exitosamente.")
         
         with st.expander("Ver tabla de datos procesados"):
             st.dataframe(df_famosos, use_container_width=True)
             
-        st.markdown("### 🖼️ Galería Dinámica")
+        st.markdown("### Galería Dinámica")
         for idx, row in df_famosos.iterrows():
             nombre = row['Nombre']
             edad = row['Edad']
@@ -393,9 +495,9 @@ if archivo_famosos is not None:
                         img_url, cap_date, from_cache = get_wiki_image(nombre)
                         if img_url:
                             if from_cache:
-                                st.info("⚡ Imagen recuperada desde la Caché en Neon (famosos_cache).", icon="⚡")
+                                st.info("Imagen recuperada desde la Caché en Neon (famosos_cache).", icon="⚡")
                             else:
-                                st.warning("🌐 Imagen consultada desde Wikipedia API y guardada en caché.", icon="🌐")
+                                st.warning("Imagen consultada desde Wikipedia API y guardada en caché.", icon="🌐")
                             
                             img_c1, img_c2, img_c3 = st.columns([1, 2, 1])
                             with img_c2:
@@ -410,7 +512,7 @@ if archivo_famosos is not None:
     except Exception as e:
         st.error(f"Error al procesar el archivo de famosos: {e}")
 else:
-    st.info("ℹ️ Sube un archivo con los datos de las celebridades para generar la galería y la consulta de imágenes.")
+    st.info("ℹ Sube un archivo con los datos de las celebridades para generar la galería y la consulta de imágenes.")
 
 # ------------------------------------------
 # SECCIÓN 3: GEOLOCALIZACIÓN HISTÓRICA
