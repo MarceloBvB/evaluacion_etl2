@@ -457,7 +457,9 @@ try:
             data=df_lugares,
             get_position='[lon, lat]',
             get_color='[200, 30, 0, 160]',
-            get_radius=15000,
+            get_radius=1000,
+            radius_min_pixels=5,
+            radius_max_pixels=15,
             pickable=True
         )
         
@@ -472,7 +474,7 @@ try:
         st.pydeck_chart(pdk.Deck(
             layers=[layer],
             initial_view_state=view_state,
-            map_style="mapbox://styles/mapbox/navigation-night-v1",
+            map_style="road",
             tooltip={"text": "{nombre_lugar}"}
         ))
     else:
